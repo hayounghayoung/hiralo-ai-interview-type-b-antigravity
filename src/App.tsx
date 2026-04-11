@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Camera, 
@@ -19,7 +19,7 @@ import {
   AlertCircle,
   ArrowRight,
   Clock,
-  User,
+  User as UserIcon,
   Briefcase,
   ChevronUp,
   ChevronDown,
@@ -28,8 +28,81 @@ import {
   VideoOff,
   RotateCcw,
   Loader2,
-  Monitor
+  Monitor,
+  LogOut,
+  LogIn
 } from 'lucide-react';
+import { 
+  auth, 
+  db, 
+  googleProvider, 
+  signInWithPopup, 
+  signOut, 
+  onAuthStateChanged, 
+  setDoc, 
+  getDoc, 
+  serverTimestamp,
+  addDoc,
+  collection,
+  handleFirestoreError,
+  OperationType
+} from './firebase';
+import { doc } from 'firebase/firestore';
+import type { User } from './firebase';
+
+// --- Error Boundary ---
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      let displayMessage = "Something went wrong.";
+      try {
+        const parsed = JSON.parse(this.state.error?.message || "{}");
+        if (parsed.error) {
+          displayMessage = `Firebase Error: ${parsed.error} (${parsed.operationType} at ${parsed.path})`;
+        }
+      } catch (e) {
+        displayMessage = this.state.error?.message || displayMessage;
+      }
+
+      return (
+        <div className="h-screen w-screen flex flex-col items-center justify-center bg-zinc-50 p-8 text-center">
+          <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-6">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-bold text-zinc-900 mb-4">Application Error</h1>
+          <p className="text-zinc-600 mb-8 max-w-md mx-auto">{displayMessage}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all"
+          >
+            Reload Application
+          </button>
+        </div>
+      );
+    }
+
+    return (this as any).props.children;
+  }
+}
 
 // --- Types & Constants ---
 type Step = 'OVERVIEW' | 'SETUP' | 'INTRO' | 'INTERVIEW' | 'DONE';
@@ -59,7 +132,7 @@ const QUESTIONS = [
 
 // --- Components ---
 
-const Header = ({ currentStep }: { currentStep: Step }) => {
+const Header = ({ currentStep, user, onLogin, onLogout }: { currentStep: Step, user: User | null, onLogin: () => void, onLogout: () => void }) => {
   const steps = [
     { id: 'OVERVIEW', label: 'Overview', num: 1 },
     { id: 'SETUP', label: 'Setup', num: 2 },
@@ -72,52 +145,79 @@ const Header = ({ currentStep }: { currentStep: Step }) => {
   return (
     <header className="relative bg-white z-50">
       <div className="flex items-center justify-between px-8 py-3 h-16 border-b">
-        <div className="flex items-center">
+        <div className="flex items-center gap-8">
           <img 
             src="https://storage.googleapis.com/mlp-v2-dev-3f31.appspot.com/projects/azqwnezevolny44rsia5np/assets/input_file_0.png" 
             alt="Hiralo.ai Logo" 
             className="h-10 w-auto object-contain"
             referrerPolicy="no-referrer"
           />
+          
+          <nav className="hidden md:flex items-center gap-3">
+            {steps.map((s, idx) => {
+              const isActive = currentStep === s.id || (s.id === 'INTERVIEW' && currentStep === 'INTRO');
+              const isCompleted = idx < currentIdx;
+              
+              return (
+                <React.Fragment key={s.id}>
+                  <div 
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                      isActive 
+                        ? 'bg-blue-50 text-blue-600 border-blue-200' 
+                        : 'bg-white text-zinc-400 border-zinc-100'
+                    }`}
+                  >
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      isActive 
+                        ? 'bg-blue-600 text-white' 
+                        : isCompleted 
+                          ? 'bg-zinc-400 text-white' 
+                          : 'bg-zinc-100 text-zinc-400'
+                    }`}>
+                      {isCompleted ? <Check className="w-3.5 h-3.5" /> : s.num}
+                    </div>
+                    <span className={isActive ? 'text-zinc-900' : 'text-zinc-400'}>{s.label}</span>
+                  </div>
+                  {idx < steps.length - 1 && (
+                    <div className="w-8 h-[1px] bg-zinc-100" />
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </nav>
         </div>
         
-        <nav className="hidden md:flex items-center gap-3">
-          {steps.map((s, idx) => {
-            const isActive = currentStep === s.id || (s.id === 'INTERVIEW' && currentStep === 'INTRO');
-            const isCompleted = idx < currentIdx;
-            
-            return (
-              <React.Fragment key={s.id}>
-                <div 
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
-                    isActive 
-                      ? 'bg-blue-50 text-blue-600 border-blue-200' 
-                      : 'bg-white text-zinc-400 border-zinc-100'
-                  }`}
-                >
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                    isActive 
-                      ? 'bg-blue-600 text-white' 
-                      : isCompleted 
-                        ? 'bg-zinc-400 text-white' 
-                        : 'bg-zinc-100 text-zinc-400'
-                  }`}>
-                    {isCompleted ? <Check className="w-3.5 h-3.5" /> : s.num}
-                  </div>
-                  <span className={isActive ? 'text-zinc-900' : 'text-zinc-400'}>{s.label}</span>
-                </div>
-                {idx < steps.length - 1 && (
-                  <div className="w-8 h-[1px] bg-zinc-100" />
-                )}
-              </React.Fragment>
-            );
-          })}
-        </nav>
-
-        <button className="flex items-center gap-2 px-4 py-2 border border-zinc-200 rounded-xl text-sm font-medium text-zinc-600 hover:bg-zinc-50 transition-colors">
-          <HelpCircle className="w-4 h-4" />
-          Help
-        </button>
+        <div className="flex items-center gap-4">
+          {user ? (
+            <div className="flex items-center gap-3">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs font-bold text-zinc-900">{user.displayName}</p>
+                <p className="text-[10px] text-zinc-500">{user.email}</p>
+              </div>
+              <img src={user.photoURL || ''} className="w-8 h-8 rounded-full border border-zinc-200" referrerPolicy="no-referrer" />
+              <button 
+                onClick={onLogout}
+                className="p-2 text-zinc-400 hover:text-red-600 transition-colors"
+                title="Logout"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={onLogin}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+            >
+              <LogIn className="w-4 h-4" />
+              Login
+            </button>
+          )}
+          <div className="w-[1px] h-6 bg-zinc-200 mx-2" />
+          <button className="flex items-center gap-2 px-4 py-2 border border-zinc-200 rounded-xl text-sm font-medium text-zinc-600 hover:bg-zinc-50 transition-colors">
+            <HelpCircle className="w-4 h-4" />
+            Help
+          </button>
+        </div>
       </div>
       {/* Progress Bar */}
       <div className="h-1 bg-zinc-100 w-full overflow-hidden">
@@ -132,6 +232,8 @@ const Header = ({ currentStep }: { currentStep: Step }) => {
 };
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
   const [step, setStep] = useState<Step>('OVERVIEW');
   const [currentQ, setCurrentQ] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
@@ -156,10 +258,57 @@ export default function App() {
   const [setupVideoEnded, setSetupVideoEnded] = useState(false);
   const [setupVideoTime, setSetupVideoTime] = useState(0);
 
+  const [interviewResponses, setInterviewResponses] = useState<{questionId: number, videoUrl: string, timestamp: any}[]>([]);
+
   const userVideoRef = useRef<HTMLVideoElement>(null);
   const aiVideoRef = useRef<HTMLVideoElement>(null);
   const setupVideoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+
+  // Auth Listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        // Create/Update user doc
+        const userRef = doc(db, 'users', currentUser.uid);
+        try {
+          const userDoc = await getDoc(userRef);
+          if (!userDoc.exists()) {
+            await setDoc(userRef, {
+              uid: currentUser.uid,
+              email: currentUser.email,
+              displayName: currentUser.displayName,
+              photoURL: currentUser.photoURL,
+              role: 'user',
+              createdAt: serverTimestamp()
+            });
+          }
+        } catch (e) {
+          handleFirestoreError(e, OperationType.WRITE, `users/${currentUser.uid}`);
+        }
+      }
+      setUser(currentUser);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (e) {
+      console.error("Login failed", e);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setStep('OVERVIEW');
+    } catch (e) {
+      console.error("Logout failed", e);
+    }
+  };
 
   const getSetupSubtitle = (time: number) => {
     if (time > 0 && time < 4.5) {
@@ -360,20 +509,60 @@ export default function App() {
     return () => video.removeEventListener('timeupdate', updateProgress);
   }, [step, currentQ]);
 
-  const nextStep = () => {
+  const nextStep = async () => {
+    // Save response locally
+    if (recordedVideoUrl) {
+      setInterviewResponses(prev => [
+        ...prev, 
+        { questionId: QUESTIONS[currentQ].id, videoUrl: recordedVideoUrl, timestamp: new Date().toISOString() }
+      ]);
+    }
+
     setRecordedVideoUrl(null);
     setRetakesLeft(3);
     if (currentQ < QUESTIONS.length - 1) {
       setCurrentQ(prev => prev + 1);
       setTimer(QUESTIONS[currentQ + 1].duration);
     } else {
+      // Final Submission to Firestore
+      if (user) {
+        setIsSaving(true);
+        try {
+          await addDoc(collection(db, 'interviews'), {
+            userId: user.uid,
+            jobTitle: JOB_DETAILS.title,
+            company: JOB_DETAILS.company,
+            status: 'completed',
+            responses: [...interviewResponses, { questionId: QUESTIONS[currentQ].id, videoUrl: recordedVideoUrl || '', timestamp: new Date().toISOString() }],
+            submittedAt: serverTimestamp()
+          });
+        } catch (e) {
+          handleFirestoreError(e, OperationType.CREATE, 'interviews');
+        } finally {
+          setIsSaving(false);
+        }
+      }
       setStep('DONE');
     }
   };
 
+  if (!isAuthReady) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-zinc-50">
+        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+      </div>
+    );
+  }
+
   return (
-    <div className="h-[800px] max-h-[800px] bg-zinc-50 font-sans selection:bg-blue-100 selection:text-blue-900 flex flex-col overflow-hidden">
-      <Header currentStep={step} />
+    <ErrorBoundary>
+      <div className="h-[800px] max-h-[800px] bg-zinc-50 font-sans selection:bg-blue-100 selection:text-blue-900 flex flex-col overflow-hidden">
+        <Header 
+          currentStep={step} 
+          user={user} 
+          onLogin={handleLogin} 
+          onLogout={handleLogout} 
+        />
 
       <main className="flex-1 overflow-hidden relative">
         <AnimatePresence mode="wait">
@@ -407,7 +596,7 @@ export default function App() {
                         </div>
                       </div>
                       <div className="flex items-start gap-3">
-                        <User className="w-4 h-4 text-blue-500 mt-0.5" />
+                        <UserIcon className="w-4 h-4 text-blue-500 mt-0.5" />
                         <div>
                           <p className="text-[10px] text-zinc-400">Job Title</p>
                           <p className="text-sm font-semibold text-zinc-900">{JOB_DETAILS.title}</p>
@@ -529,16 +718,25 @@ export default function App() {
                   )}
                   <button 
                     onClick={() => {
+                      if (!user) {
+                        handleLogin();
+                        return;
+                      }
                       setStep('SETUP');
                     }}
-                    disabled={!agreed}
+                    disabled={!agreed || isLoading}
                     className={`px-16 py-3 rounded-xl font-semibold text-base transition-all shadow-lg ${
-                      agreed 
+                      agreed && !isLoading
                         ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100' 
                         : 'bg-zinc-200 text-zinc-400 cursor-not-allowed shadow-none'
                     }`}
                   >
-                    Next
+                    {isLoading ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Connecting...
+                      </div>
+                    ) : !user ? 'Login to Start' : 'Next'}
                   </button>
                 </div>
               </div>
@@ -1137,5 +1335,6 @@ export default function App() {
         </AnimatePresence>
       </main>
     </div>
+    </ErrorBoundary>
   );
 }

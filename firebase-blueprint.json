@@ -1,0 +1,52 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "photoURL": { "type": "string", "description": "User profile photo URL" },
+        "role": { "type": "string", "enum": ["admin", "user"], "description": "User role" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation timestamp" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "Interview": {
+      "title": "Interview",
+      "description": "A completed interview session",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the user who took the interview" },
+        "jobTitle": { "type": "string", "description": "Title of the job" },
+        "company": { "type": "string", "description": "Company name" },
+        "status": { "type": "string", "enum": ["pending", "completed"], "description": "Interview status" },
+        "responses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "questionId": { "type": "number" },
+              "videoUrl": { "type": "string" },
+              "timestamp": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "submittedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "status", "submittedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/interviews/{interviewId}": {
+      "schema": "Interview",
+      "description": "Interview session records"
+    }
+  }
+}

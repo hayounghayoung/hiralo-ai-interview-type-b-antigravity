@@ -1,0 +1,116 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (Auth UID)
+    // Fields:
+    //   - uid: string (required) - Firebase Auth UID
+    //   - email: string (required) - User email address
+    //   - displayName: string (optional) - User display name
+    //   - photoURL: string (optional) - User profile photo URL
+    //   - role: string (required, enum: ['admin', 'user']) - User role
+    //   - createdAt: timestamp (required) - Account creation timestamp
+    //
+    // Collection: interviews
+    // Document ID: interviewId (Auto-generated)
+    // Fields:
+    //   - userId: string (required) - UID of the user who took the interview
+    //   - jobTitle: string (required) - Title of the job
+    //   - company: string (required) - Company name
+    //   - status: string (required, enum: ['pending', 'completed']) - Interview status
+    //   - responses: list (required) - List of question responses
+    //   - submittedAt: timestamp (required) - Submission timestamp
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "wkdgkdud5471@gmail.com" && request.auth.token.email_verified == true)); // Default admin
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'role', 'createdAt']) &&
+             hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.role in ['admin', 'user'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidInterview(data) {
+      return hasRequiredFields(['userId', 'jobTitle', 'company', 'status', 'responses', 'submittedAt']) &&
+             hasOnlyAllowedFields(['userId', 'jobTitle', 'company', 'status', 'responses', 'submittedAt']) &&
+             data.userId == request.auth.uid &&
+             data.status in ['pending', 'completed'] &&
+             data.responses is list &&
+             data.submittedAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Users can only read their own profile, admins can read all
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Users can create their own profile if it's valid and they don't grant themselves admin role
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'user' || isAdmin());
+      
+      // Users can update their own profile but cannot change their role unless they are an admin
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+      
+      allow delete: if isAdmin();
+    }
+
+    match /interviews/{interviewId} {
+      // Users can only read their own interviews, admins can read all
+      allow read: if (isAuthenticated() && resource.data.userId == request.auth.uid) || isAdmin();
+      
+      // Users can create their own interviews
+      allow create: if isAuthenticated() && isValidInterview(request.resource.data);
+      
+      // Only admins can update or delete interviews
+      allow update, delete: if isAdmin();
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
