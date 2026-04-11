@@ -1,0 +1,5 @@
+{
+  "name": "Hiralo.ai - AI Video Interview",
+  "description": "A professional AI-powered video interview platform for modern recruitment.",
+  "requestFramePermissions": ["camera", "microphone"]
+}
