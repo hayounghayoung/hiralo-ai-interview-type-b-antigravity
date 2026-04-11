@@ -132,7 +132,7 @@ const QUESTIONS = [
 
 // --- Components ---
 
-const Header = ({ currentStep, user, onLogin, onLogout }: { currentStep: Step, user: User | null, onLogin: () => void, onLogout: () => void }) => {
+const Header = ({ currentStep }: { currentStep: Step }) => {
   const steps = [
     { id: 'OVERVIEW', label: 'Overview', num: 1 },
     { id: 'SETUP', label: 'Setup', num: 2 },
@@ -188,31 +188,6 @@ const Header = ({ currentStep, user, onLogin, onLogout }: { currentStep: Step, u
         </div>
         
         <div className="flex items-center gap-4">
-          {user ? (
-            <div className="flex items-center gap-3">
-              <div className="text-right hidden sm:block">
-                <p className="text-xs font-bold text-zinc-900">{user.displayName}</p>
-                <p className="text-[10px] text-zinc-500">{user.email}</p>
-              </div>
-              <img src={user.photoURL || ''} className="w-8 h-8 rounded-full border border-zinc-200" referrerPolicy="no-referrer" />
-              <button 
-                onClick={onLogout}
-                className="p-2 text-zinc-400 hover:text-red-600 transition-colors"
-                title="Logout"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            </div>
-          ) : (
-            <button 
-              onClick={onLogin}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
-            >
-              <LogIn className="w-4 h-4" />
-              Login
-            </button>
-          )}
-          <div className="w-[1px] h-6 bg-zinc-200 mx-2" />
           <button className="flex items-center gap-2 px-4 py-2 border border-zinc-200 rounded-xl text-sm font-medium text-zinc-600 hover:bg-zinc-50 transition-colors">
             <HelpCircle className="w-4 h-4" />
             Help
@@ -546,23 +521,10 @@ export default function App() {
     }
   };
 
-  if (!isAuthReady) {
-    return (
-      <div className="h-screen w-screen flex items-center justify-center bg-zinc-50">
-        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-      </div>
-    );
-  }
-
   return (
     <ErrorBoundary>
       <div className="h-[800px] max-h-[800px] bg-zinc-50 font-sans selection:bg-blue-100 selection:text-blue-900 flex flex-col overflow-hidden">
-        <Header 
-          currentStep={step} 
-          user={user} 
-          onLogin={handleLogin} 
-          onLogout={handleLogout} 
-        />
+        <Header currentStep={step} />
 
       <main className="flex-1 overflow-hidden relative">
         <AnimatePresence mode="wait">
@@ -718,10 +680,6 @@ export default function App() {
                   )}
                   <button 
                     onClick={() => {
-                      if (!user) {
-                        handleLogin();
-                        return;
-                      }
                       setStep('SETUP');
                     }}
                     disabled={!agreed || isLoading}
@@ -736,7 +694,7 @@ export default function App() {
                         <Loader2 className="w-4 h-4 animate-spin" />
                         Connecting...
                       </div>
-                    ) : !user ? 'Login to Start' : 'Next'}
+                    ) : 'Start'}
                   </button>
                 </div>
               </div>
