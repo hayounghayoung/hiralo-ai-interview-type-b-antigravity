@@ -5,6 +5,14 @@
   --font-sans: "Poppins", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Poppins", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
+  
+  --color-blue-50: #EEF0FF;
+  --color-blue-100: #DDE3FF;
+  --color-blue-400: #8A9AFC;
+  --color-blue-500: #6B7EFD;
+  --color-blue-600: #5064FC;
+  --color-blue-700: #3E51DD;
+  --color-blue-900: #22319A;
 }
 
 @layer base {

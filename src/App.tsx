@@ -3,44 +3,45 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useEffect, Component, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useRef, useEffect, ErrorInfo, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Camera, 
-  Mic, 
-  CheckCircle2, 
+import {
+  Camera,
+  Mic,
+  CheckCircle2,
   Check,
-  Play, 
-  Square, 
-  ChevronRight, 
-  HelpCircle, 
-  Video, 
+  Play,
+  HelpCircle,
+  Video,
   Info,
   AlertCircle,
-  ArrowRight,
   Clock,
   User as UserIcon,
   Briefcase,
   ChevronUp,
-  ChevronDown,
   X,
   MicOff,
   VideoOff,
   RotateCcw,
   Loader2,
   Monitor,
-  LogOut,
-  LogIn
+  MapPin,
+  Calendar,
+  Lock,
 } from 'lucide-react';
-import { 
-  auth, 
-  db, 
-  googleProvider, 
-  signInWithPopup, 
-  signOut, 
-  onAuthStateChanged, 
-  setDoc, 
-  getDoc, 
+import {
+  auth,
+  db,
+  storage,
+  storageRef,
+  uploadBytes,
+  getDownloadURL,
+  googleProvider,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged,
+  setDoc,
+  getDoc,
   serverTimestamp,
   addDoc,
   collection,
@@ -119,13 +120,13 @@ const QUESTIONS = [
   { 
     id: 1, 
     text: "자기소개를 부탁드립니다.", 
-    video: "https://www.w3schools.com/html/mov_bbb.mp4",
+    video: "/Question_1.mp4",
     duration: 60 
   },
   { 
     id: 2, 
     text: "본인의 가장 큰 강점은 무엇인가요?", 
-    video: "https://www.w3schools.com/html/movie.mp4",
+    video: "/Question2.mp4",
     duration: 90
   },
 ];
@@ -144,13 +145,12 @@ const Header = ({ currentStep }: { currentStep: Step }) => {
 
   return (
     <header className="relative bg-white z-50">
-      <div className="flex items-center justify-between px-8 py-3 h-16 border-b">
+      <div className="flex items-center justify-between px-8 py-3 h-16 border-b border-zinc-100">
         <div className="flex items-center gap-8">
           <img 
-            src="https://storage.googleapis.com/mlp-v2-dev-3f31.appspot.com/projects/azqwnezevolny44rsia5np/assets/input_file_0.png" 
+            src="/logo.svg" 
             alt="Hiralo.ai Logo" 
-            className="h-10 w-auto object-contain"
-            referrerPolicy="no-referrer"
+            className="h-8 w-auto object-contain"
           />
           
           <nav className="hidden md:flex items-center gap-3">
@@ -161,25 +161,23 @@ const Header = ({ currentStep }: { currentStep: Step }) => {
               return (
                 <React.Fragment key={s.id}>
                   <div 
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                    className={`flex items-center gap-2 md:w-36 justify-center px-4 py-2 rounded-xl text-sm font-semibold transition-all border ${
                       isActive 
-                        ? 'bg-blue-50 text-blue-600 border-blue-200' 
-                        : 'bg-white text-zinc-400 border-zinc-100'
+                        ? 'bg-white text-zinc-900 border-blue-400 shadow-sm' 
+                        : 'bg-zinc-50/50 text-zinc-800 border-zinc-200'
                     }`}
                   >
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                    <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
                       isActive 
-                        ? 'bg-blue-600 text-white' 
-                        : isCompleted 
-                          ? 'bg-zinc-400 text-white' 
-                          : 'bg-zinc-100 text-zinc-400'
+                        ? 'bg-blue-500 text-white' 
+                        : 'bg-zinc-200 text-zinc-600'
                     }`}>
-                      {isCompleted ? <Check className="w-3.5 h-3.5" /> : s.num}
+                      {s.num}
                     </div>
-                    <span className={isActive ? 'text-zinc-900' : 'text-zinc-400'}>{s.label}</span>
+                    <span>{s.label}</span>
                   </div>
                   {idx < steps.length - 1 && (
-                    <div className="w-8 h-[1px] bg-zinc-100" />
+                    <div className="w-8 h-[2px] bg-zinc-100" />
                   )}
                 </React.Fragment>
               );
@@ -194,14 +192,16 @@ const Header = ({ currentStep }: { currentStep: Step }) => {
           </button>
         </div>
       </div>
-      {/* Progress Bar */}
-      <div className="h-1 bg-zinc-100 w-full overflow-hidden">
-        <motion.div 
-          initial={{ width: 0 }}
-          animate={{ width: `${((currentIdx + 1) / steps.length) * 100}%` }}
-          className="h-full bg-blue-600"
-        />
-      </div>
+      {/* Progress Bar - hidden during overview and interview */}
+      {currentStep !== 'OVERVIEW' && currentStep !== 'INTRO' && currentStep !== 'INTERVIEW' && (
+        <div className="h-1 bg-zinc-100 w-full overflow-hidden">
+          <motion.div
+            initial={{ width: 0 }}
+            animate={{ width: `${((currentIdx + 1) / steps.length) * 100}%` }}
+            className="h-full bg-blue-600"
+          />
+        </div>
+      )}
     </header>
   );
 };
@@ -222,6 +222,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
+  const [recordedVideoProgress, setRecordedVideoProgress] = useState(0);
   const [retakesLeft, setRetakesLeft] = useState(3);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
@@ -232,10 +233,24 @@ export default function App() {
 
   const [setupVideoEnded, setSetupVideoEnded] = useState(false);
   const [setupVideoTime, setSetupVideoTime] = useState(0);
+  const [introVideoTime, setIntroVideoTime] = useState(0);
+  const [questionVideoEnded, setQuestionVideoEnded] = useState(false);
+  const [questionVideoTime, setQuestionVideoTime] = useState(0);
+  const [closingVideoEnded, setClosingVideoEnded] = useState(false);
+  const [closingVideoTime, setClosingVideoTime] = useState(0);
 
   const [interviewResponses, setInterviewResponses] = useState<{questionId: number, videoUrl: string, timestamp: any}[]>([]);
 
+  const closingVideoRef = useRef<HTMLVideoElement>(null);
   const userVideoRef = useRef<HTMLVideoElement>(null);
+  // Callback ref: attaches stream immediately when the video element mounts
+  const userVideoRefCallback = React.useCallback((node: HTMLVideoElement | null) => {
+    userVideoRef.current = node;
+    if (node && stream) {
+      node.srcObject = stream;
+    }
+  }, [stream]);
+  const setupCameraRef = useRef<HTMLVideoElement>(null);
   const aiVideoRef = useRef<HTMLVideoElement>(null);
   const setupVideoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -289,8 +304,39 @@ export default function App() {
     if (time > 0 && time < 4.5) {
       return "Before we dive into the questions, let’s take a moment to ensure your equipment is working perfectly.";
     }
-    if (time >= 4.5 && time < 8.5) {
+    if (time >= 4.5) {
       return "Please check your camera, microphone, and audio before we begin.";
+    }
+    return "";
+  };
+
+  const getIntroSubtitle = (time: number) => {
+    if (time > 0 && time < 4) {
+      return "Welcome, and thank you for being here today.";
+    }
+    if (time >= 4) {
+      return "Before we dive into the questions, let’s take a moment to ensure your equipment is working perfectly. When you’re ready, we’ll begin the interview.";
+    }
+    return "";
+  };
+
+  const getQuestion1Subtitle = (time: number) => {
+    if (time > 0) {
+      return "Let’s start with a quick overview. Tell me about yourself, your background, and what interests you about this role.";
+    }
+    return "";
+  };
+
+  const getQuestion2Subtitle = (time: number) => {
+    if (time > 0) {
+      return "Is there anything else you’d like to share about your background, or a project you’re especially proud of that we haven’t covered yet?";
+    }
+    return "";
+  };
+
+  const getClosingSubtitle = (time: number) => {
+    if (time > 0) {
+      return "That concludes our interview for today. Thank you for your time and for sharing more about your background and experience. I hope you have a wonderful rest of your day!";
     }
     return "";
   };
@@ -413,24 +459,36 @@ export default function App() {
     if (!isRecording && stream) {
       setIsRecording(true);
       setTimer(QUESTIONS[currentQ].duration);
-      
-      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+
+      const mimeType = 'video/webm;codecs=vp9,opus';
+      const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
-      
+
       const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => chunks.push(e.data);
-      recorder.onstop = () => {
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = async () => {
         const blob = new Blob(chunks, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        
-        setIsSaving(true);
-        // Simulate saving delay
-        setTimeout(() => {
-          setIsSaving(false);
-          setRecordedVideoUrl(url);
-        }, 1500);
+        // Show recorded video immediately with local blob URL
+        const localUrl = URL.createObjectURL(blob);
+        setRecordedVideoUrl(localUrl);
+        setIsSaving(false);
+
+        // Upload to Firebase Storage in the background (only when authenticated)
+        if (auth.currentUser) {
+          try {
+            const uid = auth.currentUser.uid;
+            const path = `interviews/${uid}/q${QUESTIONS[currentQ].id}_${Date.now()}.webm`;
+            const fileRef = storageRef(storage, path);
+            await uploadBytes(fileRef, blob);
+            const downloadUrl = await getDownloadURL(fileRef);
+            // Update to cloud URL silently
+            setRecordedVideoUrl(downloadUrl);
+          } catch (err) {
+            console.error('Background upload failed, keeping local URL', err);
+          }
+        }
       };
-      
+
       recorder.start();
     } else {
       stopRecording();
@@ -463,10 +521,10 @@ export default function App() {
     };
   }, [stream]);
 
-  // Setup video preview when stream changes
+  // Attach stream to SETUP preview camera
   useEffect(() => {
-    if (userVideoRef.current && stream) {
-      userVideoRef.current.srcObject = stream;
+    if (setupCameraRef.current && stream) {
+      setupCameraRef.current.srcObject = stream;
     }
   }, [stream, step]);
 
@@ -495,6 +553,8 @@ export default function App() {
 
     setRecordedVideoUrl(null);
     setRetakesLeft(3);
+    setQuestionVideoEnded(false);
+    setQuestionVideoTime(0);
     if (currentQ < QUESTIONS.length - 1) {
       setCurrentQ(prev => prev + 1);
       setTimer(QUESTIONS[currentQ + 1].duration);
@@ -538,7 +598,7 @@ export default function App() {
               className="grid lg:grid-cols-12 min-h-full"
             >
               {/* Sidebar */}
-              <div className="lg:col-span-4 bg-blue-50/30 border-r border-zinc-200 p-8 space-y-6 overflow-y-auto">
+              <div className="lg:col-span-4 bg-slate-50 border-r border-zinc-200 p-8 space-y-6 overflow-y-auto">
                 <div className="space-y-3">
                   <h2 className="font-display font-semibold text-xl text-zinc-900">About Your Interview</h2>
                   <p className="text-sm text-zinc-500 leading-relaxed">
@@ -549,7 +609,7 @@ export default function App() {
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <h3 className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">Job Details</h3>
-                    <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm space-y-3">
+                    <div className="bg-white p-5 rounded-2xl border border-zinc-100 shadow-sm space-y-5">
                       <div className="flex items-start gap-3">
                         <Briefcase className="w-4 h-4 text-blue-500 mt-0.5" />
                         <div>
@@ -565,16 +625,14 @@ export default function App() {
                         </div>
                       </div>
                       <div className="flex items-start gap-3">
-                        <div className="w-4 h-4 flex items-center justify-center">
-                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
-                        </div>
+                        <MapPin className="w-4 h-4 text-blue-500 mt-0.5" />
                         <div>
                           <p className="text-[10px] text-zinc-400">Location</p>
                           <p className="text-sm font-semibold text-zinc-900">{JOB_DETAILS.location}</p>
                         </div>
                       </div>
                       <div className="flex items-start gap-3">
-                        <Clock className="w-4 h-4 text-blue-500 mt-0.5" />
+                        <Calendar className="w-4 h-4 text-blue-500 mt-0.5" />
                         <div>
                           <p className="text-[10px] text-zinc-400">Experience</p>
                           <p className="text-sm font-semibold text-zinc-900">{JOB_DETAILS.experience}</p>
@@ -630,29 +688,28 @@ export default function App() {
                       icon: <CheckCircle2 className="w-5 h-5 text-blue-500" />
                     },
                   ].map((item) => (
-                    <div key={item.num} className="p-5 bg-white border border-zinc-100 rounded-2xl shadow-sm hover:shadow-md transition-shadow space-y-3">
-                      <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center">
+                    <div key={item.num} className="p-6 bg-white border border-zinc-200 rounded-2xl shadow-sm hover:shadow-md transition-shadow space-y-5">
+                      <div className="w-10 h-10 bg-blue-50/50 rounded-xl flex items-center justify-center">
                         {item.icon}
                       </div>
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-semibold text-zinc-400"><span className="text-blue-600">{item.num}</span> {item.title}</p>
-                        <p className="text-xs text-zinc-500 leading-relaxed">{item.desc}</p>
+                      <div className="space-y-1.5">
+                        <p className="text-sm font-semibold text-zinc-800 flex items-center gap-2">
+                          <span className="text-blue-500">{item.num}</span>
+                          {item.title}
+                        </p>
+                        <p className="text-[13px] text-zinc-500 leading-relaxed">{item.desc}</p>
                       </div>
                     </div>
                   ))}
                 </div>
 
                 <div className="space-y-4">
-                  <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-xl flex items-start gap-3">
-                    <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border border-blue-100 shadow-sm shrink-0">
-                      <AlertCircle className="w-4 h-4 text-blue-500" />
-                    </div>
-                    <div className="space-y-0.5">
-                      <p className="text-xs text-zinc-700">
-                        Your interview responses are encrypted, stored securely, and shared exclusively with the hiring team.
-                      </p>
-                      <button className="text-[10px] text-blue-600 font-medium hover:underline">Read our privacy policy →</button>
-                    </div>
+                  <div className="py-3 px-4 bg-zinc-50 border border-zinc-100 rounded-xl flex items-start gap-3">
+                    <Lock className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                    <p className="text-xs text-zinc-900 font-medium leading-relaxed">
+                      Your interview responses are encrypted, stored securely, and shared exclusively with the hiring team.{" "}
+                      <button className="text-blue-600 font-medium hover:underline">Read our privacy policy →</button>
+                    </p>
                   </div>
 
                   <label className="flex items-center gap-3 cursor-pointer group">
@@ -661,11 +718,11 @@ export default function App() {
                         type="checkbox" 
                         checked={agreed}
                         onChange={(e) => setAgreed(e.target.checked)}
-                        className="peer h-4 w-4 cursor-pointer appearance-none rounded border border-zinc-300 bg-white transition-all checked:border-blue-600 checked:bg-blue-600" 
+                        className="peer h-4 w-4 cursor-pointer appearance-none rounded border border-zinc-300 bg-white transition-all checked:border-blue-500 checked:bg-blue-500" 
                       />
-                      <CheckCircle2 className="absolute left-0 top-0 h-4 w-4 text-white opacity-0 peer-checked:opacity-100" />
+                      <Check className="absolute left-[1px] top-[1px] h-[14px] w-[14px] text-white opacity-0 peer-checked:opacity-100" strokeWidth={3} />
                     </div>
-                    <span className="text-xs text-zinc-600 font-medium group-hover:text-zinc-900 transition-colors">
+                    <span className="text-xs text-zinc-800 font-medium group-hover:text-zinc-900 transition-colors">
                       I have read and understood the interview process and privacy notice
                     </span>
                   </label>
@@ -683,9 +740,9 @@ export default function App() {
                       setStep('SETUP');
                     }}
                     disabled={!agreed || isLoading}
-                    className={`px-16 py-3 rounded-xl font-semibold text-base transition-all shadow-lg ${
+                    className={`px-24 py-3 rounded-2xl font-semibold text-sm transition-all shadow-sm ${
                       agreed && !isLoading
-                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100' 
+                        ? 'bg-blue-500 text-white hover:bg-blue-600 shadow-blue-100' 
                         : 'bg-zinc-200 text-zinc-400 cursor-not-allowed shadow-none'
                     }`}
                   >
@@ -694,7 +751,7 @@ export default function App() {
                         <Loader2 className="w-4 h-4 animate-spin" />
                         Connecting...
                       </div>
-                    ) : 'Start'}
+                    ) : 'Next'}
                   </button>
                 </div>
               </div>
@@ -716,14 +773,14 @@ export default function App() {
                   ref={setupVideoRef}
                   autoPlay 
                   playsInline 
-                  src="https://storage.googleapis.com/mlp-v2-dev-3f31.appspot.com/projects/azqwnezevolny44rsia5np/assets/input_file_1.mp4"
+                  src="/Device_setup.mp4"
                   onEnded={() => setSetupVideoEnded(true)}
                   onTimeUpdate={(e) => setSetupVideoTime(e.currentTarget.currentTime)}
                   className="absolute inset-0 w-full h-full object-cover"
                 />
 
                 {/* Subtitles Overlay (Image Style) */}
-                <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm p-8 z-20">
+                <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm px-8 py-8 h-32 flex flex-col justify-center z-20">
                   <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Device Setup</p>
                   <p className="text-white text-lg font-semibold leading-tight">
                     {getSetupSubtitle(setupVideoTime) || "Before we dive into the questions, let's take a moment to ensure your equipment is working perfectly."}
@@ -748,23 +805,7 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Small Camera Preview Overlay */}
-                <div className="absolute top-6 right-6 w-48 aspect-video bg-zinc-800 rounded-xl border border-white/20 shadow-2xl overflow-hidden z-40">
-                  {stream?.getVideoTracks().length ? (
-                    <video 
-                      autoPlay 
-                      playsInline 
-                      muted 
-                      ref={userVideoRef}
-                      className="w-full h-full object-cover mirror-mode"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center gap-2">
-                      <Camera className="w-6 h-6 text-zinc-600" />
-                      <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest">No Signal</span>
-                    </div>
-                  )}
-                </div>
+
               </div>
 
               {/* Right: Setup Controls */}
@@ -821,35 +862,35 @@ export default function App() {
 
                   <div className="space-y-4">
                     {/* Microphone Card */}
-                    <div className="p-6 rounded-2xl border border-zinc-100 bg-zinc-50/30 flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
-                        <Mic className="w-6 h-6" />
+                    <div className="p-5 rounded-2xl border border-zinc-200/60 bg-zinc-50 flex items-center gap-4">
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
+                        stream?.getAudioTracks().length ? 'bg-[#e2f8e9] text-[#22a057]' : 'bg-[#eef1f5] text-[#5e6c84]'
+                      }`}>
+                        <Mic className="w-5 h-5" />
                       </div>
                       <div className="flex-1">
-                        <h3 className="font-bold text-zinc-900 text-base">Microphone</h3>
-                        <p className="text-xs text-zinc-500">Enable microphone to record audio responses</p>
+                        <h3 className="font-semibold text-[#172b4d] text-[17px]">Microphone</h3>
+                        <p className="text-[14px] text-zinc-500 mt-0.5">Enable microphone to record audio responses</p>
                       </div>
                       {stream?.getAudioTracks().length ? (
-                        <CheckCircle2 className="w-6 h-6 text-green-500" />
-                      ) : (
-                        <div className="w-6 h-6 border-2 border-zinc-200 rounded-full" />
-                      )}
+                        <CheckCircle2 className="w-5 h-5 text-[#22a057]" />
+                      ) : null}
                     </div>
 
                     {/* Camera Card */}
-                    <div className="p-6 rounded-2xl border border-zinc-100 bg-zinc-50/30 flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
-                        <Camera className="w-6 h-6" />
+                    <div className="p-5 rounded-2xl border border-zinc-200/60 bg-zinc-50 flex items-center gap-4">
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
+                        stream?.getVideoTracks().length ? 'bg-[#e2f8e9] text-[#22a057]' : 'bg-[#eef1f5] text-[#5e6c84]'
+                      }`}>
+                        <Camera className="w-5 h-5" />
                       </div>
                       <div className="flex-1">
-                        <h3 className="font-bold text-zinc-900 text-base">Camera</h3>
-                        <p className="text-xs text-zinc-500">Enable camera to record video responses</p>
+                        <h3 className="font-semibold text-[#172b4d] text-[17px]">Camera</h3>
+                        <p className="text-[14px] text-zinc-500 mt-0.5">Enable camera to record video responses</p>
                       </div>
                       {stream?.getVideoTracks().length ? (
-                        <CheckCircle2 className="w-6 h-6 text-green-500" />
-                      ) : (
-                        <div className="w-6 h-6 border-2 border-zinc-200 rounded-full" />
-                      )}
+                        <CheckCircle2 className="w-5 h-5 text-[#22a057]" />
+                      ) : null}
                     </div>
                   </div>
 
@@ -875,13 +916,15 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-8">
-                  <button 
-                    onClick={() => setStep('OVERVIEW')}
-                    className="text-zinc-500 font-bold hover:text-zinc-900 transition-colors px-6"
-                  >
-                    Cancel
-                  </button>
+                <div className="grid grid-cols-2 gap-4 pt-8 pb-4 mt-auto">
+                  <div className="flex items-center justify-center">
+                    <button 
+                      onClick={() => setStep('OVERVIEW')}
+                      className="text-zinc-500 font-medium text-base hover:text-zinc-900 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                   <button 
                     onClick={() => {
                       if (stream?.getVideoTracks().length && stream?.getAudioTracks().length) {
@@ -890,9 +933,13 @@ export default function App() {
                         startCamera();
                       }
                     }}
-                    className="px-16 py-4 bg-blue-300 hover:bg-blue-400 text-white rounded-2xl font-bold text-lg transition-all shadow-lg shadow-blue-100"
+                    className={`w-full py-4 rounded-2xl font-medium text-[15px] transition-all ${
+                      stream?.getVideoTracks().length && stream?.getAudioTracks().length
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20'
+                        : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20'
+                    }`}
                   >
-                    Next
+                    {stream?.getVideoTracks().length && stream?.getAudioTracks().length ? 'Next' : 'Next'}
                   </button>
                 </div>
               </div>
@@ -909,10 +956,10 @@ export default function App() {
               className="grid lg:grid-cols-2 h-full overflow-hidden"
             >
               {/* Left: AI Interviewer */}
-              <div className="relative h-full bg-zinc-100 overflow-hidden group">
+              <div className="relative h-full bg-zinc-900 overflow-hidden">
                 {/* Progress Bar */}
-                <div className="absolute top-0 left-0 right-0 h-1.5 bg-zinc-200 z-20">
-                  <motion.div 
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-zinc-200/30 z-20">
+                  <motion.div
                     className="h-full bg-blue-600"
                     initial={{ width: 0 }}
                     animate={{ width: `${videoProgress}%` }}
@@ -920,60 +967,106 @@ export default function App() {
                   />
                 </div>
 
-                <div className="w-full h-full relative">
-                  <video 
-                    ref={aiVideoRef}
-                    key={currentQ} 
-                    autoPlay 
-                    playsInline
-                    onEnded={() => {
-                      if (step === 'INTRO') {
-                        setStep('INTERVIEW');
-                      }
-                    }}
-                    className="w-full h-full object-cover"
-                  >
-                    <source src={QUESTIONS[currentQ].video} type="video/mp4" />
-                  </video>
-                  
-                  {/* Play Button Overlay (PRD Style) */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-2xl">
-                      <Play className="w-8 h-8 text-blue-600 fill-current ml-1" />
-                    </div>
-                  </div>
+                {/* Video */}
+                <video
+                  ref={aiVideoRef}
+                  key={step === 'INTRO' ? 'intro' : currentQ}
+                  autoPlay
+                  playsInline
+                  onEnded={() => {
+                    if (step === 'INTRO') {
+                      // Auto-transition to Question 1 without any button
+                      setIntroVideoTime(0);
+                      setStep('INTERVIEW');
+                    } else {
+                      setQuestionVideoEnded(true);
+                    }
+                  }}
+                  onTimeUpdate={(e: React.SyntheticEvent<HTMLVideoElement>) => {
+                    if (step === 'INTRO') {
+                      setIntroVideoTime(e.currentTarget.currentTime);
+                    } else {
+                      setQuestionVideoTime(e.currentTarget.currentTime);
+                    }
+                  }}
+                  className="absolute inset-0 w-full h-full object-cover"
+                >
+                  <source
+                    src={step === 'INTRO' ? '/Introduction.mp4' : QUESTIONS[currentQ].video}
+                    type="video/mp4"
+                  />
+                </video>
+
+                {/* Subtitle Overlay */}
+                <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm px-8 py-8 h-32 flex flex-col justify-center z-20">
+                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">
+                    {step === 'INTRO' ? 'Introduction' : `Question ${QUESTIONS[currentQ].id}`}
+                  </p>
+                  <p className="text-white text-lg font-semibold leading-tight">
+                    {step === 'INTRO'
+                      ? (getIntroSubtitle(introVideoTime) || "Welcome, and thank you for being here today.")
+                      : currentQ === 0
+                        ? (getQuestion1Subtitle(questionVideoTime) || "Let's start with a quick overview. Tell me about yourself, your background, and what interests you about this role.")
+                        : currentQ === 1
+                          ? (getQuestion2Subtitle(questionVideoTime) || "Is there anything else you'd like to share about your background, or a project you're especially proud of that we haven't covered yet?")
+                          : QUESTIONS[currentQ].text}
+                  </p>
                 </div>
 
-                <div className="absolute bottom-12 left-12 right-12 p-8 bg-black/60 backdrop-blur-md rounded-3xl text-white border border-white/10 shadow-2xl">
-                  <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-3">
-                    {step === 'INTRO' ? 'Introduction' : `Question ${QUESTIONS[currentQ].id} of 10`}
-                  </p>
-                  <p className="text-xl font-medium leading-relaxed">
-                    {step === 'INTRO' 
-                      ? "Whenever you're ready, let's take a deep breath and begin." 
-                      : QUESTIONS[currentQ].text}
-                  </p>
-                </div>
+
+                {/* Question Ended: Replay Button */}
+                {step === 'INTERVIEW' && questionVideoEnded && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-30">
+                    <button
+                      onClick={() => {
+                        if (aiVideoRef.current) {
+                          aiVideoRef.current.currentTime = 0;
+                          aiVideoRef.current.play();
+                          setQuestionVideoEnded(false);
+                          setQuestionVideoTime(0);
+                        }
+                      }}
+                      className="w-20 h-20 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 transition-all group"
+                    >
+                      <Play className="w-10 h-10 text-white fill-white group-hover:scale-110 transition-transform" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Right: User Camera & Controls */}
               <div className="relative h-full bg-zinc-900 flex flex-col">
                 <div className="flex-1 relative overflow-hidden">
                   {recordedVideoUrl ? (
-                    <video 
-                      src={recordedVideoUrl}
-                      autoPlay 
-                      loop
-                      playsInline
-                      className="w-full h-full object-cover scale-x-[-1]" 
-                    />
+                    <>
+                      {/* Recorded Video Progress Bar */}
+                      <div className="absolute top-0 left-0 right-0 h-1.5 bg-zinc-200/30 z-20">
+                        <motion.div
+                          className="h-full bg-blue-600"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${recordedVideoProgress}%` }}
+                          transition={{ ease: "linear" }}
+                        />
+                      </div>
+                      <video
+                        src={recordedVideoUrl}
+                        autoPlay
+                        playsInline
+                        onTimeUpdate={(e: React.SyntheticEvent<HTMLVideoElement>) => {
+                          const progress = (e.currentTarget.currentTime / e.currentTarget.duration) * 100;
+                          setRecordedVideoProgress(progress || 0);
+                        }}
+                        onEnded={() => setRecordedVideoProgress(100)}
+                        className="w-full h-full object-cover scale-x-[-1]"
+                      />
+                    </>
                   ) : isVideoOn ? (
-                    <video 
-                      ref={userVideoRef} 
-                      autoPlay 
-                      muted 
+                    <video
+                      ref={userVideoRefCallback}
+                      autoPlay
+                      muted
                       playsInline
-                      className="w-full h-full object-cover scale-x-[-1]" 
+                      className="w-full h-full object-cover scale-x-[-1]"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center bg-zinc-800">
@@ -1017,7 +1110,122 @@ export default function App() {
 
                 {/* Bottom Control Bar */}
                 <div className="h-32 bg-zinc-800/90 backdrop-blur-md border-t border-white/10 flex items-center justify-center px-12">
-                  {recordedVideoUrl ? (
+                  {step === 'INTRO' ? (
+                    /* INTRO: Start Interview centered, toggles on edges */
+                    <div className="w-full flex items-center justify-between relative">
+                      {/* Left: Audio/Video toggles with dropup (same as INTERVIEW) */}
+                      <div className="flex gap-6">
+                        {/* Audio */}
+                        <div className="flex flex-col items-center gap-2 relative">
+                          <AnimatePresence>
+                            {showAudioMenu && (
+                              <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: 10 }}
+                                className="absolute bottom-full mb-4 left-0 w-64 bg-zinc-800 border border-white/10 rounded-2xl shadow-2xl p-2 z-50"
+                              >
+                                <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest p-3">Select Microphone</p>
+                                <div className="max-h-48 overflow-auto">
+                                  {audioDevices.map(device => (
+                                    <button
+                                      key={device.deviceId}
+                                      onClick={() => handleDeviceChange('audio', device.deviceId)}
+                                      className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-colors flex items-center justify-between ${
+                                        selectedAudioId === device.deviceId ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-white/5'
+                                      }`}
+                                    >
+                                      <span className="truncate pr-2">{device.label || `Microphone ${device.deviceId.slice(0, 5)}`}</span>
+                                      {selectedAudioId === device.deviceId && <CheckCircle2 className="w-4 h-4 shrink-0" />}
+                                    </button>
+                                  ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setIsMicOn(!isMicOn)}
+                              className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${isMicOn ? 'bg-zinc-100 text-zinc-900' : 'bg-red-500 text-white'}`}
+                            >
+                              {isMicOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+                            </button>
+                            <button
+                              onClick={() => setShowAudioMenu(!showAudioMenu)}
+                              className={`w-8 h-12 rounded-xl text-white flex items-center justify-center hover:bg-zinc-700 transition-colors ${showAudioMenu ? 'bg-zinc-700' : 'bg-zinc-700/50'}`}
+                            >
+                              <ChevronUp className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Audio</span>
+                        </div>
+                        {/* Video */}
+                        <div className="flex flex-col items-center gap-2 relative">
+                          <AnimatePresence>
+                            {showVideoMenu && (
+                              <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: 10 }}
+                                className="absolute bottom-full mb-4 left-0 w-64 bg-zinc-800 border border-white/10 rounded-2xl shadow-2xl p-2 z-50"
+                              >
+                                <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest p-3">Select Camera</p>
+                                <div className="max-h-48 overflow-auto">
+                                  {videoDevices.map(device => (
+                                    <button
+                                      key={device.deviceId}
+                                      onClick={() => handleDeviceChange('video', device.deviceId)}
+                                      className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-colors flex items-center justify-between ${
+                                        selectedVideoId === device.deviceId ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-white/5'
+                                      }`}
+                                    >
+                                      <span className="truncate pr-2">{device.label || `Camera ${device.deviceId.slice(0, 5)}`}</span>
+                                      {selectedVideoId === device.deviceId && <CheckCircle2 className="w-4 h-4 shrink-0" />}
+                                    </button>
+                                  ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setIsVideoOn(!isVideoOn)}
+                              className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${isVideoOn ? 'bg-zinc-100 text-zinc-900' : 'bg-red-500 text-white'}`}
+                            >
+                              {isVideoOn ? <Camera className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
+                            </button>
+                            <button
+                              onClick={() => setShowVideoMenu(!showVideoMenu)}
+                              className={`w-8 h-12 rounded-xl text-white flex items-center justify-center hover:bg-zinc-700 transition-colors ${showVideoMenu ? 'bg-zinc-700' : 'bg-zinc-700/50'}`}
+                            >
+                              <ChevronUp className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Video</span>
+                        </div>
+                      </div>
+                      {/* Center: Start Interview (Disabled during INTRO) */}
+                      <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 opacity-50">
+                        <button
+                          disabled
+                          className="w-16 h-16 rounded-full border-4 border-white/50 bg-transparent flex items-center justify-center cursor-not-allowed"
+                        >
+                          <div className="w-12 h-12 bg-red-600/50 rounded-full" />
+                        </button>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Start Interview</span>
+                      </div>
+                      {/* Right: Exit */}
+                      <div className="flex flex-col items-center gap-2">
+                        <button
+                          onClick={() => setStep('OVERVIEW')}
+                          className="w-12 h-12 rounded-full bg-zinc-100/20 text-white flex items-center justify-center hover:bg-zinc-100/30 transition-colors"
+                        >
+                          <X className="w-6 h-6" />
+                        </button>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Exit</span>
+                      </div>
+                    </div>
+                  ) : recordedVideoUrl ? (
                     <div className="flex gap-4 w-full max-w-2xl">
                       <button 
                         onClick={() => {
@@ -1044,14 +1252,14 @@ export default function App() {
                       </button>
                     </div>
                   ) : (
-                    <div className="w-full flex items-center justify-between">
-                      {/* Left: Audio/Video Toggles */}
+                    <div className="w-full flex items-center justify-between relative">
+                      {/* Left: Audio/Video Toggles with dropup */}
                       <div className="flex gap-6">
+                        {/* Audio */}
                         <div className="flex flex-col items-center gap-2 relative">
-                          {/* Audio Menu */}
                           <AnimatePresence>
                             {showAudioMenu && (
-                              <motion.div 
+                              <motion.div
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: 10 }}
@@ -1060,13 +1268,8 @@ export default function App() {
                                 <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest p-3">Select Microphone</p>
                                 <div className="max-h-48 overflow-auto">
                                   {audioDevices.map(device => (
-                                    <button
-                                      key={device.deviceId}
-                                      onClick={() => handleDeviceChange('audio', device.deviceId)}
-                                      className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-colors flex items-center justify-between ${
-                                        selectedAudioId === device.deviceId ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-white/5'
-                                      }`}
-                                    >
+                                    <button key={device.deviceId} onClick={() => handleDeviceChange('audio', device.deviceId)}
+                                      className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-colors flex items-center justify-between ${selectedAudioId === device.deviceId ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-white/5'}`}>
                                       <span className="truncate pr-2">{device.label || `Microphone ${device.deviceId.slice(0, 5)}`}</span>
                                       {selectedAudioId === device.deviceId && <CheckCircle2 className="w-4 h-4 shrink-0" />}
                                     </button>
@@ -1075,31 +1278,21 @@ export default function App() {
                               </motion.div>
                             )}
                           </AnimatePresence>
-
                           <div className="flex items-center gap-1">
-                            <button 
-                              onClick={() => setIsMicOn(!isMicOn)}
-                              className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${
-                                isMicOn ? 'bg-zinc-100 text-zinc-900' : 'bg-red-500 text-white'
-                              }`}
-                            >
+                            <button onClick={() => setIsMicOn(!isMicOn)} className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${isMicOn ? 'bg-zinc-100 text-zinc-900' : 'bg-red-500 text-white'}`}>
                               {isMicOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
                             </button>
-                            <button 
-                              onClick={() => setShowAudioMenu(!showAudioMenu)}
-                              className={`w-8 h-12 rounded-xl text-white flex items-center justify-center hover:bg-zinc-700 transition-colors ${showAudioMenu ? 'bg-zinc-700' : 'bg-zinc-700/50'}`}
-                            >
+                            <button onClick={() => setShowAudioMenu(!showAudioMenu)} className={`w-8 h-12 rounded-xl text-white flex items-center justify-center hover:bg-zinc-700 transition-colors ${showAudioMenu ? 'bg-zinc-700' : 'bg-zinc-700/50'}`}>
                               <ChevronUp className="w-4 h-4" />
                             </button>
                           </div>
                           <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Audio</span>
                         </div>
-
+                        {/* Video */}
                         <div className="flex flex-col items-center gap-2 relative">
-                          {/* Video Menu */}
                           <AnimatePresence>
                             {showVideoMenu && (
-                              <motion.div 
+                              <motion.div
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: 10 }}
@@ -1108,13 +1301,8 @@ export default function App() {
                                 <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest p-3">Select Camera</p>
                                 <div className="max-h-48 overflow-auto">
                                   {videoDevices.map(device => (
-                                    <button
-                                      key={device.deviceId}
-                                      onClick={() => handleDeviceChange('video', device.deviceId)}
-                                      className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-colors flex items-center justify-between ${
-                                        selectedVideoId === device.deviceId ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-white/5'
-                                      }`}
-                                    >
+                                    <button key={device.deviceId} onClick={() => handleDeviceChange('video', device.deviceId)}
+                                      className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-colors flex items-center justify-between ${selectedVideoId === device.deviceId ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-white/5'}`}>
                                       <span className="truncate pr-2">{device.label || `Camera ${device.deviceId.slice(0, 5)}`}</span>
                                       {selectedVideoId === device.deviceId && <CheckCircle2 className="w-4 h-4 shrink-0" />}
                                     </button>
@@ -1123,20 +1311,11 @@ export default function App() {
                               </motion.div>
                             )}
                           </AnimatePresence>
-
                           <div className="flex items-center gap-1">
-                            <button 
-                              onClick={() => setIsVideoOn(!isVideoOn)}
-                              className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${
-                                isVideoOn ? 'bg-zinc-100 text-zinc-900' : 'bg-red-500 text-white'
-                              }`}
-                            >
+                            <button onClick={() => setIsVideoOn(!isVideoOn)} className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${isVideoOn ? 'bg-zinc-100 text-zinc-900' : 'bg-red-500 text-white'}`}>
                               {isVideoOn ? <Camera className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
                             </button>
-                            <button 
-                              onClick={() => setShowVideoMenu(!showVideoMenu)}
-                              className={`w-8 h-12 rounded-xl text-white flex items-center justify-center hover:bg-zinc-700 transition-colors ${showVideoMenu ? 'bg-zinc-700' : 'bg-zinc-700/50'}`}
-                            >
+                            <button onClick={() => setShowVideoMenu(!showVideoMenu)} className={`w-8 h-12 rounded-xl text-white flex items-center justify-center hover:bg-zinc-700 transition-colors ${showVideoMenu ? 'bg-zinc-700' : 'bg-zinc-700/50'}`}>
                               <ChevronUp className="w-4 h-4" />
                             </button>
                           </div>
@@ -1144,27 +1323,25 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Center: Record Button */}
-                      <div className="flex flex-col items-center gap-2">
-                        <button 
-                          onClick={step === 'INTRO' ? () => setStep('INTERVIEW') : toggleRecording}
-                          disabled={isSaving || !!recordedVideoUrl}
+                      {/* Center: Record Button (absolutely centered) */}
+                      <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
+                        <button
+                          onClick={toggleRecording}
+                          disabled={isSaving || !!recordedVideoUrl || (!questionVideoEnded && !isRecording)}
                           className={`w-16 h-16 rounded-full border-4 flex items-center justify-center transition-all ${
                             isRecording ? 'border-zinc-400 bg-white' : 'border-white bg-transparent hover:scale-105'
-                          } ${(isSaving || recordedVideoUrl) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          } ${(isSaving || recordedVideoUrl || (!questionVideoEnded && !isRecording)) ? 'opacity-40 cursor-not-allowed' : ''}`}
                         >
-                          <div className={`transition-all ${
-                            isRecording ? 'w-6 h-6 bg-red-600 rounded-sm' : 'w-12 h-12 bg-red-600 rounded-full'
-                          }`} />
+                          <div className={`transition-all ${isRecording ? 'w-6 h-6 bg-red-600 rounded-sm' : 'w-12 h-12 bg-red-600 rounded-full'}`} />
                         </button>
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-                          {step === 'INTRO' ? 'Start Interview' : isRecording ? 'Stop recording' : 'Start recording'}
+                          {isRecording ? 'Stop recording' : 'Start recording'}
                         </span>
                       </div>
 
                       {/* Right: Exit Button */}
                       <div className="flex flex-col items-center gap-2">
-                        <button 
+                        <button
                           onClick={() => setStep('OVERVIEW')}
                           className="w-12 h-12 rounded-full bg-zinc-100/20 text-white flex items-center justify-center hover:bg-zinc-100/30 transition-colors backdrop-blur-sm"
                         >
@@ -1186,28 +1363,44 @@ export default function App() {
               animate={{ opacity: 1 }}
               className="grid grid-cols-1 lg:grid-cols-2 h-full"
             >
-              {/* Left: AI Interviewer Closing */}
-              <div className="relative h-full bg-zinc-100 overflow-hidden">
-                <img 
-                  src="https://picsum.photos/seed/interviewer/1920/1080" 
-                  alt="AI Interviewer" 
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
+              {/* Left: Closing Video */}
+              <div className="relative h-full bg-zinc-900 overflow-hidden flex items-center justify-center">
+                <video
+                  ref={closingVideoRef}
+                  autoPlay
+                  playsInline
+                  src="/Closing.mp4"
+                  onEnded={() => setClosingVideoEnded(true)}
+                  onTimeUpdate={(e) => setClosingVideoTime(e.currentTarget.currentTime)}
+                  className="absolute inset-0 w-full h-full object-cover"
                 />
-                
-                {/* Play Button Overlay */}
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-2xl">
-                    <Play className="w-8 h-8 text-blue-600 fill-current ml-1" />
-                  </div>
-                </div>
 
-                <div className="absolute bottom-12 left-12 right-12 p-8 bg-black/60 backdrop-blur-md rounded-3xl text-white border border-white/10 shadow-2xl">
-                  <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-3">Closing</p>
-                  <p className="text-lg font-medium leading-relaxed opacity-90">
-                    That concludes our interview for today. Thank you so much for sharing your time and your story with me. I hope you have a wonderful rest of your day!
+                {/* Subtitle Overlay */}
+                <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm px-8 py-8 h-32 flex flex-col justify-center z-20">
+                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Closing</p>
+                  <p className="text-white text-lg font-semibold leading-tight">
+                    {getClosingSubtitle(closingVideoTime) || "That concludes our interview for today. Thank you for your time and for sharing more about your background and experience."}
                   </p>
                 </div>
+
+                {/* Replay Button */}
+                {closingVideoEnded && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-30">
+                    <button
+                      onClick={() => {
+                        if (closingVideoRef.current) {
+                          closingVideoRef.current.currentTime = 0;
+                          closingVideoRef.current.play();
+                          setClosingVideoEnded(false);
+                          setClosingVideoTime(0);
+                        }
+                      }}
+                      className="w-20 h-20 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 transition-all group"
+                    >
+                      <Play className="w-10 h-10 text-white fill-white group-hover:scale-110 transition-transform" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Right: Summary Content */}
