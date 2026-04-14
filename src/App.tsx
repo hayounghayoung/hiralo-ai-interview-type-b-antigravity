@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Check,
   Play,
+  Pause,
   HelpCircle,
   Video,
   Info,
@@ -123,11 +124,17 @@ const QUESTIONS = [
     video: "/Question_1.mp4",
     duration: 60 
   },
-  { 
-    id: 2, 
-    text: "본인의 가장 큰 강점은 무엇인가요?", 
+  {
+    id: 2,
+    text: "본인의 가장 큰 강점은 무엇인가요?",
     video: "/Question2.mp4",
-    duration: 90
+    duration: 60
+  },
+  {
+    id: 3,
+    text: "마지막으로 하고 싶은 말씀이 있으신가요?",
+    video: "/Question3.mp4",
+    duration: 60
   },
 ];
 
@@ -192,8 +199,8 @@ const Header = ({ currentStep }: { currentStep: Step }) => {
           </button>
         </div>
       </div>
-      {/* Progress Bar - hidden during overview and interview */}
-      {currentStep !== 'OVERVIEW' && currentStep !== 'INTRO' && currentStep !== 'INTERVIEW' && (
+      {/* Progress Bar - hidden */}
+      {false && (
         <div className="h-1 bg-zinc-100 w-full overflow-hidden">
           <motion.div
             initial={{ width: 0 }}
@@ -214,6 +221,8 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [timer, setTimer] = useState(60);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const [setupPhase, setSetupPhase] = useState<'mic' | 'camera'>('mic');
+  const [micReady, setMicReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
   const [videoProgress, setVideoProgress] = useState(0);
@@ -223,6 +232,8 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
   const [recordedVideoProgress, setRecordedVideoProgress] = useState(0);
+  const [recordedVideoPlaying, setRecordedVideoPlaying] = useState(false);
+  const recordedVideoRef = React.useRef<HTMLVideoElement>(null);
   const [retakesLeft, setRetakesLeft] = useState(3);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
@@ -334,6 +345,13 @@ export default function App() {
     return "";
   };
 
+  const getQuestion3Subtitle = (time: number) => {
+    if (time > 0) {
+      return "What kind of teammate do you strive to be when working with others?";
+    }
+    return "";
+  };
+
   const getClosingSubtitle = (time: number) => {
     if (time > 0) {
       return "That concludes our interview for today. Thank you for your time and for sharing more about your background and experience. I hope you have a wonderful rest of your day!";
@@ -344,15 +362,21 @@ export default function App() {
   // M-02: Permission Request & Device Enumeration
   useEffect(() => {
     if (step === 'SETUP') {
-      // Only start if not already active
-      if (stream && stream.active && stream.getVideoTracks().length > 0) return;
-      
+      setSetupPhase('mic');
+      setMicReady(false);
       const timer = setTimeout(() => {
-        startCamera();
+        startMicOnly();
       }, 300);
       return () => clearTimeout(timer);
     }
   }, [step]);
+
+  // Auto-request camera once mic is ready
+  useEffect(() => {
+    if (micReady && step === 'SETUP' && !stream?.getVideoTracks().length) {
+      startCamera();
+    }
+  }, [micReady]);
 
   const getDevices = async () => {
     try {
@@ -369,74 +393,90 @@ export default function App() {
     }
   };
 
-  const startCamera = async (audioId?: string, videoId?: string) => {
+  const startCamera = async (videoId?: string) => {
     setError(null);
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setError("Your browser does not support camera/microphone access. Please use a modern browser like Chrome.");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Camera access is not supported in this browser. Please use Chrome.");
       return;
     }
 
     try {
-      // Stop existing tracks
+      // Stop only video tracks — keep existing audio tracks alive
       if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+        stream.getVideoTracks().forEach(t => t.stop());
       }
 
       const vId = videoId || selectedVideoId;
-      const aId = audioId || selectedAudioId;
 
-      let mediaStream: MediaStream;
-
-      const constraints: MediaStreamConstraints = {
-        video: vId ? { deviceId: { ideal: vId }, width: { ideal: 1280 }, height: { ideal: 720 } } : { width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: aId ? { deviceId: { ideal: aId } } : true
-      };
+      let videoStream: MediaStream;
 
       try {
-        console.log("Attempting media access", constraints);
-        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        videoStream = await navigator.mediaDevices.getUserMedia({
+          video: vId
+            ? { deviceId: { ideal: vId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+            : { width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
       } catch (err1: any) {
-        console.warn("Primary attempt failed, trying fallback:", err1.name || err1);
-        
-        // If permission is explicitly denied, we must stop
-        if (err1.name === 'NotAllowedError' || err1.name === 'PermissionDeniedError') {
-          throw err1;
-        }
-
-        try {
-          // Fallback: Minimal constraints
-          mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        } catch (err2: any) {
-          console.error("All media access attempts failed:", err2);
-          throw err2;
-        }
+        if (err1.name === 'NotAllowedError' || err1.name === 'PermissionDeniedError') throw err1;
+        // Fallback: no resolution constraint
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       }
 
-      setStream(mediaStream);
-      
+      // Combine existing audio tracks with new video tracks
+      const audioTracks = stream?.getAudioTracks() ?? [];
+      const combined = new MediaStream([...audioTracks, ...videoStream.getVideoTracks()]);
+      setStream(combined);
+
       // Enumerate devices to get labels
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audio = devices.filter(d => d.kind === 'audioinput');
       const video = devices.filter(d => d.kind === 'videoinput');
       setAudioDevices(audio);
       setVideoDevices(video);
-      
       if (audio.length && !selectedAudioId) setSelectedAudioId(audio[0].deviceId);
       if (video.length && !selectedVideoId) setSelectedVideoId(video[0].deviceId);
     } catch (err: any) {
-      console.error("Camera/Mic access error:", err);
-      
-      let msg = "Camera and microphone permissions are required.";
+      console.error("Camera access error:", err);
+      let msg = "Camera permission is required.";
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        msg = "Permission denied. Please click the 'Lock' icon in your browser's address bar and set Camera/Microphone to 'Allow'.";
+        msg = "Camera permission denied. Please allow camera access in your browser settings and try again.";
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        msg = "No camera or microphone detected. Please connect your hardware and try again.";
+        msg = "No camera detected. Please connect a camera and try again.";
       } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-        msg = "Your hardware is already in use by another app (like Zoom or Teams). Please close it and retry.";
-      } else if (err.name === 'OverconstrainedError') {
-        msg = "The requested camera resolution is not supported by your device.";
+        msg = "Camera is in use by another app (e.g. Zoom, Teams). Please close it and try again.";
       }
-      
+      setError(msg);
+    }
+  };
+
+  const startMicOnly = async () => {
+    setError(null);
+    try {
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      const aId = selectedAudioId;
+      const micStream = await navigator.mediaDevices.getUserMedia({
+        audio: aId ? { deviceId: { ideal: aId } } : true,
+        video: false,
+      });
+      setStream(micStream);
+      setMicReady(true);
+      setSetupPhase('camera');
+      // Enumerate devices after permission granted
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audio = devices.filter(d => d.kind === 'audioinput');
+      const video = devices.filter(d => d.kind === 'videoinput');
+      setAudioDevices(audio);
+      setVideoDevices(video);
+      if (audio.length && !selectedAudioId) setSelectedAudioId(audio[0].deviceId);
+      if (video.length && !selectedVideoId) setSelectedVideoId(video[0].deviceId);
+    } catch (err: any) {
+      let msg = "Microphone permission is required.";
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        msg = "Permission denied. Please allow microphone access in your browser settings.";
+      } else if (err.name === 'NotFoundError') {
+        msg = "No microphone detected. Please connect one and try again.";
+      }
       setError(msg);
     }
   };
@@ -445,11 +485,11 @@ export default function App() {
   const handleDeviceChange = async (kind: 'audio' | 'video', deviceId: string) => {
     if (kind === 'audio') {
       setSelectedAudioId(deviceId);
-      await startCamera(deviceId, selectedVideoId);
+      await startMicOnly();
       setShowAudioMenu(false);
     } else {
       setSelectedVideoId(deviceId);
-      await startCamera(selectedAudioId, deviceId);
+      await startCamera(deviceId);
       setShowVideoMenu(false);
     }
   };
@@ -813,72 +853,36 @@ export default function App() {
                 <div className="space-y-8">
                   <div>
                     <h1 className="text-3xl font-display font-bold text-zinc-900 mb-2">Check your setup</h1>
-                    <p className="text-zinc-500 text-sm">Both camera and microphone must be ready to continue.</p>
+                    <p className="text-zinc-500 text-sm">Connect your microphone first, then your camera to continue.</p>
                     
-                    {error && (
-                      <div className="mt-6 space-y-4">
-                        <div className="p-4 bg-red-50 border border-red-100 rounded-xl flex items-start gap-3 text-red-600">
-                          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                          <div className="space-y-1">
-                            <p className="text-sm font-bold">Connection Error</p>
-                            <p className="text-xs leading-relaxed">{error}</p>
-                            <button 
-                              onClick={() => startCamera()}
-                              className="mt-2 text-xs font-bold underline underline-offset-4 hover:text-red-700 transition-colors"
-                            >
-                              Try connecting again
-                            </button>
-                          </div>
-                        </div>
-
-                        {(error.includes("Permission denied") || error.includes("NotAllowedError")) && (
-                          <div className="p-6 bg-zinc-900 rounded-2xl border border-zinc-800 space-y-4">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
-                              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">How to fix this in Chrome:</p>
-                            </div>
-                            <div className="grid grid-cols-3 gap-3">
-                              <div className="space-y-2">
-                                <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-white">1</div>
-                                <p className="text-[10px] text-zinc-400 leading-tight">Click the <span className="text-blue-400 font-bold">Lock icon</span> next to the URL</p>
-                              </div>
-                              <div className="space-y-2">
-                                <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-white">2</div>
-                                <p className="text-[10px] text-zinc-400 leading-tight">Toggle <span className="text-blue-400 font-bold">Camera & Mic</span> to "On"</p>
-                              </div>
-                              <div className="space-y-2">
-                                <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-white">3</div>
-                                <p className="text-[10px] text-zinc-400 leading-tight">Click <span className="text-blue-400 font-bold">Try again</span> above</p>
-                              </div>
-                            </div>
-                            <div className="pt-2 border-t border-white/5">
-                              <p className="text-[9px] text-zinc-500 italic">Note: If you don't see the lock icon, check your browser's site settings.</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
 
                   <div className="space-y-4">
                     {/* Microphone Card */}
-                    <div className="p-5 rounded-2xl border border-zinc-200/60 bg-zinc-50 flex items-center gap-4">
+                    <div className={`p-5 rounded-2xl border flex items-center gap-4 transition-colors ${
+                      micReady ? 'border-[#22a057]/30 bg-[#f0faf4]' : 'border-zinc-200/60 bg-zinc-50'
+                    }`}>
                       <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
-                        stream?.getAudioTracks().length ? 'bg-[#e2f8e9] text-[#22a057]' : 'bg-[#eef1f5] text-[#5e6c84]'
+                        micReady ? 'bg-[#e2f8e9] text-[#22a057]' : 'bg-[#eef1f5] text-[#5e6c84]'
                       }`}>
                         <Mic className="w-5 h-5" />
                       </div>
                       <div className="flex-1">
                         <h3 className="font-semibold text-[#172b4d] text-[17px]">Microphone</h3>
-                        <p className="text-[14px] text-zinc-500 mt-0.5">Enable microphone to record audio responses</p>
+                        <p className="text-[14px] text-zinc-500 mt-0.5">
+                          {micReady ? 'Microphone connected' : 'Connecting microphone…'}
+                        </p>
                       </div>
-                      {stream?.getAudioTracks().length ? (
-                        <CheckCircle2 className="w-5 h-5 text-[#22a057]" />
-                      ) : null}
+                      {micReady
+                        ? <CheckCircle2 className="w-5 h-5 text-[#22a057]" />
+                        : <Loader2 className="w-5 h-5 text-zinc-400 animate-spin" />
+                      }
                     </div>
 
                     {/* Camera Card */}
-                    <div className="p-5 rounded-2xl border border-zinc-200/60 bg-zinc-50 flex items-center gap-4">
+                    <div className={`p-5 rounded-2xl border flex items-center gap-4 transition-colors ${
+                      stream?.getVideoTracks().length ? 'border-[#22a057]/30 bg-[#f0faf4]' : micReady ? 'border-zinc-200/60 bg-zinc-50' : 'border-zinc-100 bg-zinc-50/50 opacity-50'
+                    }`}>
                       <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
                         stream?.getVideoTracks().length ? 'bg-[#e2f8e9] text-[#22a057]' : 'bg-[#eef1f5] text-[#5e6c84]'
                       }`}>
@@ -886,11 +890,16 @@ export default function App() {
                       </div>
                       <div className="flex-1">
                         <h3 className="font-semibold text-[#172b4d] text-[17px]">Camera</h3>
-                        <p className="text-[14px] text-zinc-500 mt-0.5">Enable camera to record video responses</p>
+                        <p className="text-[14px] text-zinc-500 mt-0.5">
+                          {stream?.getVideoTracks().length ? 'Camera connected' : micReady ? 'Connecting camera…' : 'Waiting for microphone…'}
+                        </p>
                       </div>
-                      {stream?.getVideoTracks().length ? (
-                        <CheckCircle2 className="w-5 h-5 text-[#22a057]" />
-                      ) : null}
+                      {stream?.getVideoTracks().length
+                        ? <CheckCircle2 className="w-5 h-5 text-[#22a057]" />
+                        : micReady
+                          ? <Loader2 className="w-5 h-5 text-zinc-400 animate-spin" />
+                          : null
+                      }
                     </div>
                   </div>
 
@@ -925,21 +934,16 @@ export default function App() {
                       Cancel
                     </button>
                   </div>
-                  <button 
-                    onClick={() => {
-                      if (stream?.getVideoTracks().length && stream?.getAudioTracks().length) {
-                        setStep('INTRO');
-                      } else {
-                        startCamera();
-                      }
-                    }}
+                  <button
+                    onClick={() => { if (stream?.getVideoTracks().length && micReady) setStep('INTRO'); }}
+                    disabled={!(stream?.getVideoTracks().length && micReady)}
                     className={`w-full py-4 rounded-2xl font-medium text-[15px] transition-all ${
-                      stream?.getVideoTracks().length && stream?.getAudioTracks().length
+                      stream?.getVideoTracks().length && micReady
                         ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20'
-                        : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20'
+                        : 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
                     }`}
                   >
-                    {stream?.getVideoTracks().length && stream?.getAudioTracks().length ? 'Next' : 'Next'}
+                    Next
                   </button>
                 </div>
               </div>
@@ -959,11 +963,9 @@ export default function App() {
               <div className="relative h-full bg-zinc-900 overflow-hidden">
                 {/* Progress Bar */}
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-zinc-200/30 z-20">
-                  <motion.div
+                  <div
                     className="h-full bg-blue-600"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${videoProgress}%` }}
-                    transition={{ ease: "linear" }}
+                    style={{ width: `${videoProgress}%`, transition: 'width 0.25s linear' }}
                   />
                 </div>
 
@@ -977,16 +979,19 @@ export default function App() {
                     if (step === 'INTRO') {
                       // Auto-transition to Question 1 without any button
                       setIntroVideoTime(0);
+                      setVideoProgress(0);
                       setStep('INTERVIEW');
                     } else {
                       setQuestionVideoEnded(true);
                     }
                   }}
                   onTimeUpdate={(e: React.SyntheticEvent<HTMLVideoElement>) => {
+                    const { currentTime, duration } = e.currentTarget;
+                    if (duration) setVideoProgress((currentTime / duration) * 100);
                     if (step === 'INTRO') {
-                      setIntroVideoTime(e.currentTarget.currentTime);
+                      setIntroVideoTime(currentTime);
                     } else {
-                      setQuestionVideoTime(e.currentTarget.currentTime);
+                      setQuestionVideoTime(currentTime);
                     }
                   }}
                   className="absolute inset-0 w-full h-full object-cover"
@@ -1009,14 +1014,16 @@ export default function App() {
                         ? (getQuestion1Subtitle(questionVideoTime) || "Let's start with a quick overview. Tell me about yourself, your background, and what interests you about this role.")
                         : currentQ === 1
                           ? (getQuestion2Subtitle(questionVideoTime) || "Is there anything else you'd like to share about your background, or a project you're especially proud of that we haven't covered yet?")
-                          : QUESTIONS[currentQ].text}
+                          : currentQ === 2
+                            ? (getQuestion3Subtitle(questionVideoTime) || "What kind of teammate do you strive to be when working with others?")
+                            : QUESTIONS[currentQ].text}
                   </p>
                 </div>
 
 
                 {/* Question Ended: Replay Button */}
                 {step === 'INTERVIEW' && questionVideoEnded && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-30">
+                  <div className="absolute top-0 left-0 right-0 bottom-32 flex items-center justify-center bg-black/20 z-30">
                     <button
                       onClick={() => {
                         if (aiVideoRef.current) {
@@ -1049,16 +1056,33 @@ export default function App() {
                         />
                       </div>
                       <video
+                        ref={recordedVideoRef}
                         src={recordedVideoUrl}
-                        autoPlay
                         playsInline
                         onTimeUpdate={(e: React.SyntheticEvent<HTMLVideoElement>) => {
                           const progress = (e.currentTarget.currentTime / e.currentTarget.duration) * 100;
                           setRecordedVideoProgress(progress || 0);
                         }}
-                        onEnded={() => setRecordedVideoProgress(100)}
+                        onPlay={() => setRecordedVideoPlaying(true)}
+                        onPause={() => setRecordedVideoPlaying(false)}
+                        onEnded={() => { setRecordedVideoProgress(100); setRecordedVideoPlaying(false); }}
                         className="w-full h-full object-cover scale-x-[-1]"
                       />
+                      {/* Play / Pause button */}
+                      <button
+                        onClick={() => {
+                          const v = recordedVideoRef.current;
+                          if (!v) return;
+                          if (v.paused) { v.play(); } else { v.pause(); }
+                        }}
+                        className="absolute inset-0 flex items-center justify-center group z-10"
+                      >
+                        <div className={`w-20 h-20 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 transition-opacity ${recordedVideoPlaying ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}>
+                          {recordedVideoPlaying
+                            ? <Pause className="w-8 h-8 text-white fill-white" />
+                            : <Play className="w-8 h-8 text-white fill-white ml-1" />}
+                        </div>
+                      </button>
                     </>
                   ) : isVideoOn ? (
                     <video
