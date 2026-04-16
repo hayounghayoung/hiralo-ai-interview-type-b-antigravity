@@ -248,6 +248,7 @@ export default function App() {
   const [questionVideoEnded, setQuestionVideoEnded] = useState(false);
   const [questionVideoTime, setQuestionVideoTime] = useState(0);
   const [closingVideoEnded, setClosingVideoEnded] = useState(false);
+  const [showReadyModal, setShowReadyModal] = useState(false);
   const [closingVideoTime, setClosingVideoTime] = useState(0);
 
   const [interviewResponses, setInterviewResponses] = useState<{questionId: number, videoUrl: string, timestamp: any}[]>([]);
@@ -950,6 +951,40 @@ export default function App() {
             </motion.div>
           )}
 
+          {/* --- Ready Modal --- */}
+          <AnimatePresence>
+            {showReadyModal && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 16 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                  transition={{ duration: 0.2 }}
+                  className="bg-white rounded-3xl shadow-2xl p-8 mx-6 w-full max-w-sm"
+                >
+                  <h2 className="text-xl font-bold text-zinc-900 mb-2">Ready to begin?</h2>
+                  <p className="text-zinc-500 text-sm leading-relaxed mb-6">
+                    Take a moment to settle in. When you feel ready, we'll begin the interview.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setShowReadyModal(false);
+                      setStep('INTERVIEW');
+                    }}
+                    className="w-full py-4 bg-indigo-500 hover:bg-indigo-600 text-white font-semibold text-base rounded-2xl transition-colors"
+                  >
+                    Start interview
+                  </button>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* --- INTERVIEW / INTRO --- */}
           {(step === 'INTRO' || step === 'INTERVIEW') && (
             <motion.div 
@@ -977,10 +1012,9 @@ export default function App() {
                   playsInline
                   onEnded={() => {
                     if (step === 'INTRO') {
-                      // Auto-transition to Question 1 without any button
                       setIntroVideoTime(0);
                       setVideoProgress(0);
-                      setStep('INTERVIEW');
+                      setShowReadyModal(true);
                     } else {
                       setQuestionVideoEnded(true);
                     }
